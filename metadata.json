@@ -1,0 +1,6 @@
+{
+  "name": "Ervas & Produtos Naturais em Manaus",
+  "description": "Guia interativo de lojas de ervas medicinais, botânicas, empórios e granel por cidade com mapa dinâmico e geolocalização.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
