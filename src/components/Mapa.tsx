@@ -154,6 +154,22 @@ export default function Mapa({
               )
               .join('')}
           </div>
+          ${
+            loja.telefone
+              ? `
+              <div style="margin-bottom: 8px;">
+                <a
+                  href="https://wa.me/${loja.telefone.replace(/\D/g, '').startsWith('55') ? loja.telefone.replace(/\D/g, '') : `55${loja.telefone.replace(/\D/g, '')}`}"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style="display: inline-flex; align-items: center; justify-content: center; gap: 4px; width: 100%; padding: 5px 8px; background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46; border-radius: 6px; font-size: 11px; font-weight: 600; text-decoration: none; margin-bottom: 4px;"
+                >
+                  💬 WhatsApp: ${loja.telefone}
+                </a>
+              </div>
+              `
+              : ''
+          }
           <a
             href="${googleMapsUrl}"
             target="_blank"

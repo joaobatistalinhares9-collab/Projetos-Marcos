@@ -19,7 +19,10 @@ import {
   Phone,
   Filter,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Copy,
+  Check,
+  MessageCircle
 } from 'lucide-react';
 
 function calcularDistancia(lat1: number, lon1: number, lat2: number, lon2: number): number {
@@ -56,10 +59,28 @@ export default function App() {
   const [gpsError, setGpsError] = useState<string | null>(null);
   const [favoritos, setFavoritos] = useState<string[]>([]);
   const [selectedLojaId, setSelectedLojaId] = useState<string | null>(null);
+  const [copiadoId, setCopiadoId] = useState<string | null>(null);
 
   // Region filter state
   const [regiaoFiltro, setRegiaoFiltro] = useState<string>('Todas');
   const [boxCidadesAberto, setBoxCidadesAberto] = useState<boolean>(true);
+
+  const copiarNumero = (telefone: string, id: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    navigator.clipboard.writeText(telefone);
+    setCopiadoId(id);
+    setTimeout(() => {
+      setCopiadoId(null);
+    }, 2000);
+  };
+
+  const formatarNumeroParaWhatsapp = (telefone: string): string => {
+    const apenasDigitos = telefone.replace(/\D/g, '');
+    if (apenasDigitos.startsWith('55')) {
+      return apenasDigitos;
+    }
+    return `55${apenasDigitos}`;
+  };
 
   // Load saved favorites from localStorage
   useEffect(() => {
@@ -753,7 +774,7 @@ export default function App() {
                     <span className="font-semibold text-slate-700 shrink-0">Endereço:</span> {loja.endereco}
                   </p>
 
-                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1 text-xs text-slate-500">
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mt-2 text-xs text-slate-500">
                     {loja.horario && (
                       <span className="flex items-center gap-1">
                         <Clock className="w-3 h-3 text-slate-400 shrink-0" />
@@ -762,10 +783,40 @@ export default function App() {
                     )}
 
                     {loja.telefone && (
-                      <span className="flex items-center gap-1 text-emerald-800 font-medium">
-                        <Phone className="w-3 h-3 text-emerald-600 shrink-0" />
-                        <span>{loja.telefone}</span>
-                      </span>
+                      <div className="flex items-center gap-1.5 bg-emerald-50/90 border border-emerald-200/80 rounded-lg p-1 pr-2">
+                        <a
+                          href={`https://wa.me/${formatarNumeroParaWhatsapp(loja.telefone)}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          title="Clique para abrir conversa no WhatsApp"
+                          className="flex items-center gap-1 text-emerald-800 hover:text-emerald-950 font-semibold px-1.5 py-0.5 rounded hover:bg-emerald-100/70 transition-colors"
+                        >
+                          <MessageCircle className="w-3.5 h-3.5 text-emerald-600 fill-emerald-100 shrink-0" />
+                          <span>{loja.telefone}</span>
+                          <span className="text-[10px] bg-emerald-600 text-white px-1 py-0.2 rounded font-medium ml-0.5">WhatsApp</span>
+                        </a>
+
+                        <button
+                          type="button"
+                          id={`btn-copiar-${loja.id}`}
+                          onClick={(e) => copiarNumero(loja.telefone, loja.id, e)}
+                          title="Copiar número de telefone"
+                          className="flex items-center gap-1 text-[11px] font-medium px-1.5 py-0.5 bg-white hover:bg-emerald-100 text-slate-700 hover:text-emerald-900 border border-slate-200 hover:border-emerald-300 rounded shadow-2xs transition-all active:scale-95"
+                        >
+                          {copiadoId === loja.id ? (
+                            <>
+                              <Check className="w-3 h-3 text-emerald-600" />
+                              <span className="text-emerald-700 font-bold">Copiado!</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="w-3 h-3 text-slate-500" />
+                              <span>Copiar</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
                     )}
                   </div>
                 </div>
