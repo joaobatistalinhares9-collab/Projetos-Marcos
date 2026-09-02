@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { lojas, cidades, Loja, CidadeInfo } from './data/lojas';
 import Mapa from './components/Mapa';
+import { GestaoAbordagens } from './components/GestaoAbordagens';
+import { ModalObservacoes } from './components/ModalObservacoes';
+import { StatusAbordagem, TagItem, LojaCrmData } from './types';
 import {
   Search,
   MapPin,
@@ -22,7 +25,12 @@ import {
   ChevronUp,
   Copy,
   Check,
-  MessageCircle
+  MessageCircle,
+  FileText,
+  HelpCircle,
+  CheckCircle2,
+  XCircle,
+  Tag as TagIcon
 } from 'lucide-react';
 
 function calcularDistancia(lat1: number, lon1: number, lat2: number, lon2: number): number {
@@ -48,7 +56,67 @@ const REGIOES = [
   { id: 'Sul', nome: 'Sul', icone: '🌲' },
 ] as const;
 
+const DEFAULT_TAGS: {
+  nao_abordado: TagItem[];
+  abordado: TagItem[];
+  negou: TagItem[];
+} = {
+  nao_abordado: [
+    {
+      id: 'tag-nao-1',
+      nome: 'Prioridade Alta',
+      subTags: [
+        { id: 'sub-nao-1-1', nome: 'Zona Central' },
+        { id: 'sub-nao-1-2', nome: 'Grande Porte' }
+      ]
+    },
+    {
+      id: 'tag-nao-2',
+      nome: 'Rota da Semana',
+      subTags: []
+    }
+  ],
+  abordado: [
+    {
+      id: 'tag-ab-1',
+      nome: 'Em Negociação',
+      subTags: [
+        { id: 'sub-ab-1-1', nome: 'Catálogo Enviado' },
+        { id: 'sub-ab-1-2', nome: 'Aguardando Retorno' }
+      ]
+    },
+    {
+      id: 'tag-ab-2',
+      nome: 'Parceria Fechada',
+      subTags: [
+        { id: 'sub-ab-2-1', nome: 'Primeiro Pedido' },
+        { id: 'sub-ab-2-2', nome: 'Cliente Recorrente' }
+      ]
+    }
+  ],
+  negou: [
+    {
+      id: 'tag-neg-1',
+      nome: 'Sem Interesse no Momento',
+      subTags: [
+        { id: 'sub-neg-1-1', nome: 'Tentar em 3 meses' }
+      ]
+    },
+    {
+      id: 'tag-neg-2',
+      nome: 'Já Possui Fornecedor',
+      subTags: []
+    },
+    {
+      id: 'tag-neg-3',
+      nome: 'Preço / Condições',
+      subTags: []
+    }
+  ]
+};
+
 export default function App() {
+  const [abaAtiva, setAbaAtiva] = useState<'guia' | 'gestao'>('guia');
   const [cidadeSelecionadaId, setCidadeSelecionadaId] = useState<string>('manaus-am');
   const [busca, setBusca] = useState('');
   const [categoriaAtiva, setCategoriaAtiva] = useState<string>('Todas');
@@ -61,9 +129,226 @@ export default function App() {
   const [selectedLojaId, setSelectedLojaId] = useState<string | null>(null);
   const [copiadoId, setCopiadoId] = useState<string | null>(null);
 
+  // CRM State & Persistence
+  const [crmLojas, setCrmLojas] = useState<Record<string, LojaCrmData>>({});
+  const [tagsPorBox, setTagsPorBox] = useState<{
+    nao_abordado: TagItem[];
+    abordado: TagItem[];
+    negou: TagItem[];
+  }>(DEFAULT_TAGS);
+  const [lojaObsModal, setLojaObsModal] = useState<Loja | null>(null);
+
   // Region filter state
   const [regiaoFiltro, setRegiaoFiltro] = useState<string>('Todas');
   const [boxCidadesAberto, setBoxCidadesAberto] = useState<boolean>(true);
+
+  // Load CRM Data and Tags from localStorage
+  useEffect(() => {
+    try {
+      const savedCrm = localStorage.getItem('crm_lojas_data');
+      if (savedCrm) {
+        setCrmLojas(JSON.parse(savedCrm));
+      }
+      const savedTags = localStorage.getItem('crm_tags_por_box');
+      if (savedTags) {
+        setTagsPorBox(JSON.parse(savedTags));
+      }
+    } catch (e) {
+      console.error('Erro ao carregar dados do CRM:', e);
+    }
+  }, []);
+
+  // Save CRM helper
+  const salvarCrmData = (novosDados: Record<string, LojaCrmData>) => {
+    setCrmLojas(novosDados);
+    try {
+      localStorage.setItem('crm_lojas_data', JSON.stringify(novosDados));
+    } catch (e) {
+      console.error('Erro ao salvar CRM:', e);
+    }
+  };
+
+  // Save Tags helper
+  const salvarTagsData = (novasTags: {
+    nao_abordado: TagItem[];
+    abordado: TagItem[];
+    negou: TagItem[];
+  }) => {
+    setTagsPorBox(novasTags);
+    try {
+      localStorage.setItem('crm_tags_por_box', JSON.stringify(novasTags));
+    } catch (e) {
+      console.error('Erro ao salvar Tags:', e);
+    }
+  };
+
+  // CRM Actions
+  const handleUpdateStatusLoja = (lojaId: string, novoStatus: StatusAbordagem) => {
+    setCrmLojas((prev) => {
+      const itemAtual = prev[lojaId] || { status: 'nao_abordado' };
+      const statusAntigo = itemAtual.status || 'nao_abordado';
+      // If status changed, check if tag is still valid for this box, else reset tag
+      const tagPermanece = statusAntigo === novoStatus ? itemAtual.tagId : null;
+      const subTagPermanece = statusAntigo === novoStatus ? itemAtual.subTagId : null;
+
+      const atualizado: Record<string, LojaCrmData> = {
+        ...prev,
+        [lojaId]: {
+          ...itemAtual,
+          status: novoStatus,
+          tagId: tagPermanece,
+          subTagId: subTagPermanece,
+          dataAtualizacao: new Date().toISOString()
+        }
+      };
+      salvarCrmData(atualizado);
+      return atualizado;
+    });
+  };
+
+  const handleUpdateTagLoja = (
+    lojaId: string,
+    tagId: string | null,
+    subTagId: string | null = null
+  ) => {
+    setCrmLojas((prev) => {
+      const itemAtual = prev[lojaId] || { status: 'nao_abordado' };
+      const atualizado: Record<string, LojaCrmData> = {
+        ...prev,
+        [lojaId]: {
+          ...itemAtual,
+          tagId,
+          subTagId,
+          dataAtualizacao: new Date().toISOString()
+        }
+      };
+      salvarCrmData(atualizado);
+      return atualizado;
+    });
+  };
+
+  const handleUpdateObservacaoLoja = (lojaId: string, observacoes: string) => {
+    setCrmLojas((prev) => {
+      const itemAtual = prev[lojaId] || { status: 'nao_abordado' };
+      const atualizado: Record<string, LojaCrmData> = {
+        ...prev,
+        [lojaId]: {
+          ...itemAtual,
+          observacoes,
+          dataAtualizacao: new Date().toISOString()
+        }
+      };
+      salvarCrmData(atualizado);
+      return atualizado;
+    });
+  };
+
+  // Tag CRUD Handlers
+  const handleAdicionarTag = (box: StatusAbordagem, nome: string) => {
+    const novaTag: TagItem = {
+      id: `tag-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+      nome,
+      subTags: []
+    };
+    const novasTags = {
+      ...tagsPorBox,
+      [box]: [...tagsPorBox[box], novaTag]
+    };
+    salvarTagsData(novasTags);
+  };
+
+  const handleEditarTag = (box: StatusAbordagem, tagId: string, novoNome: string) => {
+    const novasTags = {
+      ...tagsPorBox,
+      [box]: tagsPorBox[box].map((t) => (t.id === tagId ? { ...t, nome: novoNome } : t))
+    };
+    salvarTagsData(novasTags);
+  };
+
+  const handleExcluirTag = (box: StatusAbordagem, tagId: string) => {
+    const novasTags = {
+      ...tagsPorBox,
+      [box]: tagsPorBox[box].filter((t) => t.id !== tagId)
+    };
+    salvarTagsData(novasTags);
+
+    // Reset stores that were in this tag to have no tag
+    setCrmLojas((prev) => {
+      let mudou = false;
+      const copia = { ...prev };
+      Object.keys(copia).forEach((id) => {
+        if (copia[id].tagId === tagId) {
+          copia[id] = { ...copia[id], tagId: null, subTagId: null };
+          mudou = true;
+        }
+      });
+      if (mudou) salvarCrmData(copia);
+      return copia;
+    });
+  };
+
+  const handleAdicionarSubTag = (box: StatusAbordagem, tagId: string, nomeSubTag: string) => {
+    const novaSub: { id: string; nome: string } = {
+      id: `sub-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+      nome: nomeSubTag
+    };
+    const novasTags = {
+      ...tagsPorBox,
+      [box]: tagsPorBox[box].map((t) =>
+        t.id === tagId ? { ...t, subTags: [...t.subTags, novaSub] } : t
+      )
+    };
+    salvarTagsData(novasTags);
+  };
+
+  const handleEditarSubTag = (
+    box: StatusAbordagem,
+    tagId: string,
+    subTagId: string,
+    novoNome: string
+  ) => {
+    const novasTags = {
+      ...tagsPorBox,
+      [box]: tagsPorBox[box].map((t) =>
+        t.id === tagId
+          ? {
+              ...t,
+              subTags: t.subTags.map((s) => (s.id === subTagId ? { ...s, nome: novoNome } : s))
+            }
+          : t
+      )
+    };
+    salvarTagsData(novasTags);
+  };
+
+  const handleExcluirSubTag = (box: StatusAbordagem, tagId: string, subTagId: string) => {
+    const novasTags = {
+      ...tagsPorBox,
+      [box]: tagsPorBox[box].map((t) =>
+        t.id === tagId
+          ? {
+              ...t,
+              subTags: t.subTags.filter((s) => s.id !== subTagId)
+            }
+          : t
+      )
+    };
+    salvarTagsData(novasTags);
+
+    // Reset subTagId in stores that had it
+    setCrmLojas((prev) => {
+      let mudou = false;
+      const copia = { ...prev };
+      Object.keys(copia).forEach((id) => {
+        if (copia[id].subTagId === subTagId) {
+          copia[id] = { ...copia[id], subTagId: null };
+          mudou = true;
+        }
+      });
+      if (mudou) salvarCrmData(copia);
+      return copia;
+    });
+  };
 
   const copiarNumero = (telefone: string, id: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
@@ -261,7 +546,7 @@ export default function App() {
     <div className="min-h-screen bg-gradient-to-b from-emerald-50/70 via-stone-50 to-emerald-50/40 text-slate-800 antialiased">
       {/* Top Banner / Navigation Bar */}
       <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-emerald-100 shadow-xs">
-        <div className="max-w-5xl mx-auto px-4 py-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+        <div className="max-w-5xl mx-auto px-4 py-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
             <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white shadow-sm font-bold text-xl shrink-0">
               🌿
@@ -271,27 +556,61 @@ export default function App() {
                 Ervas & Produtos Naturais
               </h1>
               <p className="text-xs text-emerald-700 font-medium flex items-center gap-1">
-                <MapPin className="w-3 h-3 inline text-emerald-600" /> Guia Nacional de Ervanárias & Empórios
+                <MapPin className="w-3 h-3 inline text-emerald-600" /> Guia Nacional & Gestão de Abordagens
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-end">
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-between sm:justify-end">
+            {/* View Tab Switcher */}
+            <div className="flex items-center bg-emerald-100/70 p-1 rounded-xl border border-emerald-200 shadow-2xs">
+              <button
+                type="button"
+                id="tab-guia-mapa"
+                onClick={() => setAbaAtiva('guia')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                  abaAtiva === 'guia'
+                    ? 'bg-white text-emerald-950 shadow-xs ring-1 ring-emerald-300'
+                    : 'text-emerald-900 hover:bg-white/60'
+                }`}
+              >
+                <Compass className="w-3.5 h-3.5 text-emerald-700" />
+                <span>Guia & Mapa</span>
+              </button>
+
+              <button
+                type="button"
+                id="tab-gestao-abordagens"
+                onClick={() => setAbaAtiva('gestao')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                  abaAtiva === 'gestao'
+                    ? 'bg-white text-emerald-950 shadow-xs ring-1 ring-emerald-300'
+                    : 'text-emerald-900 hover:bg-white/60'
+                }`}
+              >
+                <FileText className="w-3.5 h-3.5 text-emerald-700" />
+                <span>Gestão (CRM)</span>
+                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-emerald-200 text-emerald-900 font-extrabold">
+                  3 Boxes
+                </span>
+              </button>
+            </div>
+
             {/* Quick City Selector Dropdown in Header */}
-            <div className="relative flex-1 sm:flex-initial">
+            <div className="relative flex-1 sm:flex-initial min-w-[150px]">
               <label htmlFor="select-cidade-header" className="sr-only">Selecionar Cidade</label>
               <select
                 id="select-cidade-header"
                 value={cidadeSelecionadaId}
                 onChange={(e) => handleCityChange(e.target.value)}
-                className="w-full sm:w-auto text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-colors cursor-pointer"
+                className="w-full sm:w-auto text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-colors cursor-pointer"
               >
-                <option value="todas">🌍 Todas as Cidades ({lojas.length} lojas)</option>
+                <option value="todas">🌍 Todas ({lojas.length})</option>
                 {(['Norte', 'Nordeste', 'Sudeste', 'Centro-Oeste', 'Sul'] as const).map((reg) => (
                   <optgroup key={reg} label={`Região ${reg}`}>
                     {(cidadesPorRegiao[reg] || []).map((c) => (
                       <option key={c.id} value={c.id}>
-                        📍 {c.nome} - {c.uf} ({contagemPorCidade[c.id] || 0} locais)
+                        📍 {c.nome} - {c.uf} ({contagemPorCidade[c.id] || 0})
                       </option>
                     ))}
                   </optgroup>
@@ -303,14 +622,14 @@ export default function App() {
             <button
               id="btn-header-favoritos"
               onClick={() => setApenasFavoritos(!apenasFavoritos)}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all border shrink-0 ${
+              className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all border shrink-0 ${
                 apenasFavoritos
                   ? 'bg-rose-50 text-rose-700 border-rose-300 shadow-xs ring-2 ring-rose-200'
                   : 'bg-white text-emerald-800 border-slate-200 hover:bg-emerald-50'
               }`}
             >
               <Heart className={`w-3.5 h-3.5 ${apenasFavoritos ? 'fill-rose-500 text-rose-500' : 'text-emerald-700'}`} />
-              <span>Salvos ({favoritos.length})</span>
+              <span>({favoritos.length})</span>
             </button>
           </div>
         </div>
@@ -318,8 +637,28 @@ export default function App() {
 
       {/* Main Container */}
       <main className="max-w-5xl mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
-        
-        {/* City Selector Bar Grouped by Region (Collapsible / Retrátil) */}
+        {abaAtiva === 'gestao' ? (
+          <GestaoAbordagens
+            cidades={cidades}
+            cidadesPorRegiao={cidadesPorRegiao}
+            todasLojas={lojasProcessadas}
+            cidadeSelecionadaId={cidadeSelecionadaId}
+            onSelecionarCidade={(id) => handleCityChange(id)}
+            crmLojas={crmLojas}
+            tagsPorBox={tagsPorBox}
+            onUpdateStatusLoja={handleUpdateStatusLoja}
+            onUpdateTagLoja={handleUpdateTagLoja}
+            onUpdateObservacaoLoja={handleUpdateObservacaoLoja}
+            onAdicionarTag={handleAdicionarTag}
+            onEditarTag={handleEditarTag}
+            onExcluirTag={handleExcluirTag}
+            onAdicionarSubTag={handleAdicionarSubTag}
+            onEditarSubTag={handleEditarSubTag}
+            onExcluirSubTag={handleExcluirSubTag}
+          />
+        ) : (
+          <>
+            {/* City Selector Bar Grouped by Region (Collapsible / Retrátil) */}
         <section className="bg-white rounded-2xl shadow-sm border border-emerald-100/90 overflow-hidden transition-all duration-300">
           {/* Header click bar (abre / fecha) */}
           <div
@@ -695,6 +1034,12 @@ export default function App() {
             const isFavorito = favoritos.includes(loja.id);
             const isSelected = selectedLojaId === loja.id;
 
+            const crm = crmLojas[loja.id];
+            const status: StatusAbordagem = crm?.status || 'nao_abordado';
+            const tag = tagsPorBox[status]?.find((t) => t.id === crm?.tagId);
+            const subTag = tag?.subTags.find((s) => s.id === crm?.subTagId);
+            const temObs = Boolean(crm?.observacoes && crm.observacoes.trim().length > 0);
+
             return (
               <div
                 key={loja.id}
@@ -729,7 +1074,54 @@ export default function App() {
                     />
                   </button>
 
-                  <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mt-2">
+                  {/* CRM Status & Tag Row + OBS. Button */}
+                  <div className="flex flex-wrap items-center justify-between gap-1.5 mt-2">
+                    <div className="flex flex-wrap items-center gap-1">
+                      <span
+                        className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${
+                          status === 'abordado'
+                            ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                            : status === 'negou'
+                            ? 'bg-rose-100 text-rose-800 border-rose-300'
+                            : 'bg-slate-100 text-slate-700 border-slate-300'
+                        }`}
+                      >
+                        {status === 'abordado'
+                          ? '🟢 Abordado'
+                          : status === 'negou'
+                          ? '🔴 Negou'
+                          : '⚪ Não Abordado'}
+                      </span>
+
+                      {tag && (
+                        <span className="text-[10px] font-semibold px-2 py-0.5 bg-slate-100 text-slate-700 rounded-full border border-slate-200 flex items-center gap-1">
+                          <TagIcon className="w-2.5 h-2.5 text-emerald-600" />
+                          {tag.nome}
+                          {subTag ? ` › ${subTag.nome}` : ''}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* OBS. Button */}
+                    <button
+                      type="button"
+                      id={`btn-obs-card-${loja.id}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setLojaObsModal(loja);
+                      }}
+                      className={`text-[11px] font-bold px-2 py-0.5 rounded-lg border transition-all flex items-center gap-1 ${
+                        temObs
+                          ? 'bg-amber-100 text-amber-900 border-amber-300 hover:bg-amber-200 shadow-2xs'
+                          : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200'
+                      }`}
+                    >
+                      <FileText className={`w-3 h-3 ${temObs ? 'text-amber-700' : 'text-slate-400'}`} />
+                      <span>{temObs ? 'OBS. 📝' : 'OBS.'}</span>
+                    </button>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mt-2.5">
                     <span
                       className={`text-xs px-2.5 py-0.5 rounded-full font-semibold flex items-center gap-1 ${
                         loja.categoria === 'Ervas & Plantas'
@@ -806,7 +1198,7 @@ export default function App() {
                         >
                           {copiadoId === loja.id ? (
                             <>
-                              <Check className="w-3 h-3 text-emerald-600" />
+                              <Check className="w-3 h-3 text-emerald-600 font-bold" />
                               <span className="text-emerald-700 font-bold">Copiado!</span>
                             </>
                           ) : (
@@ -819,9 +1211,69 @@ export default function App() {
                       </div>
                     )}
                   </div>
+
+                  {/* Preview of OBS note if present */}
+                  {temObs && (
+                    <div className="mt-2.5 p-2 bg-amber-50/80 border border-amber-200 rounded-lg text-xs text-amber-900 leading-tight">
+                      <span className="font-bold">📝 OBS:</span> {crm!.observacoes}
+                    </div>
+                  )}
                 </div>
 
                 <div className="space-y-3 pt-3 border-t border-slate-100">
+                  {/* Status Action Buttons (Não Abordado, Abordado, Negou) */}
+                  <div>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      <button
+                        type="button"
+                        id={`btn-card-status-nao-${loja.id}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleUpdateStatusLoja(loja.id, 'nao_abordado');
+                        }}
+                        className={`py-1.5 px-1 text-center rounded-xl text-xs font-bold transition-all border ${
+                          status === 'nao_abordado'
+                            ? 'bg-slate-800 text-white border-slate-900 shadow-2xs'
+                            : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border-slate-200'
+                        }`}
+                      >
+                        Não Abordado
+                      </button>
+
+                      <button
+                        type="button"
+                        id={`btn-card-status-ab-${loja.id}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleUpdateStatusLoja(loja.id, 'abordado');
+                        }}
+                        className={`py-1.5 px-1 text-center rounded-xl text-xs font-bold transition-all border ${
+                          status === 'abordado'
+                            ? 'bg-emerald-600 text-white border-emerald-700 shadow-2xs'
+                            : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border-emerald-200'
+                        }`}
+                      >
+                        Abordado
+                      </button>
+
+                      <button
+                        type="button"
+                        id={`btn-card-status-neg-${loja.id}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleUpdateStatusLoja(loja.id, 'negou');
+                        }}
+                        className={`py-1.5 px-1 text-center rounded-xl text-xs font-bold transition-all border ${
+                          status === 'negou'
+                            ? 'bg-rose-600 text-white border-rose-700 shadow-2xs'
+                            : 'bg-rose-50 text-rose-800 hover:bg-rose-100 border-rose-200'
+                        }`}
+                      >
+                        Negou
+                      </button>
+                    </div>
+                  </div>
+
                   <div className="flex flex-wrap gap-1.5">
                     {loja.destaques.map((item, idx) => (
                       <span
@@ -882,11 +1334,22 @@ export default function App() {
             </button>
           </div>
         )}
+          </>
+        )}
+
+        {/* Global Observation Modal */}
+        <ModalObservacoes
+          loja={lojaObsModal}
+          crmData={lojaObsModal ? crmLojas[lojaObsModal.id] : undefined}
+          isOpen={Boolean(lojaObsModal)}
+          onClose={() => setLojaObsModal(null)}
+          onSave={handleUpdateObservacaoLoja}
+        />
 
         {/* Footer Info */}
         <footer className="text-center pt-8 pb-4 text-xs text-slate-400 space-y-1">
-          <p>Guia Nacional de Ervas Medicinais, Fitoterápicos & Empórios Saudáveis</p>
-          <p>Selecione sua cidade para encontrar os melhores empreendimentos locais.</p>
+          <p>Guia Nacional & Gestão de Prospecção de Produtos Naturais, Ervanárias & Empórios</p>
+          <p>Selecione sua cidade para gerenciar abordagens, organizar tags e registrar anotações.</p>
         </footer>
       </main>
     </div>
